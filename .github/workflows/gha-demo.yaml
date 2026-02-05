@@ -1,0 +1,36 @@
+name: 'github sample workflow'
+run-name: '${{github.actor}} triggered the workflow'
+
+on:
+    push:
+        branches:
+            - main
+
+jobs:
+        Github-demo-job:
+           name: 'Github demo job'
+           runs-on: 'ubuntu-latest'
+           steps:
+                - name: 'Linux version'
+                  shell: bash
+                  run: |
+                      uname -all
+
+                - name: 'Checkout code'
+                  uses: actions/checkout@v4
+                  with:
+                         fetch-depth: 1
+
+                - name: 'Respository path & files'
+                  shell: bash
+                  run: |
+                        echo 'github repo path ${{ github.workspace }}'
+                - name: 'Github Context usage'
+                  shell: bash
+                  run: |
+                       echo 'This workflow was triggered from the repo ${{github.repository}}'
+                       echo 'This workflow was triggered by ${{ github.actor }}'
+                       echo 'This workflow was triggered by the event ${{github.event_name}}'
+                       echo 'This workflow was triggered in the branch  ${{github.ref }}'
+            
+
