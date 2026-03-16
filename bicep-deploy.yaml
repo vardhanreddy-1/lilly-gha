@@ -1,0 +1,150 @@
+name: "Bicep Deployment workflow"
+run-name: "${{github.actor}}-triggered manually the bicep deployment workflow"
+
+on:
+    workflow_dispatch:
+        inputs:
+            environment:
+                description: "Environment to be deployed"
+                required: true
+                type: environment
+            subscriptionName:
+                description: "Name of the subscription"
+                required: true
+                type: string
+            resourceGroupName:
+                description: "Name of the resource group"
+                required: true
+                type: string
+
+permissions:
+    id-token: write
+    contents: read
+
+
+env:
+      MAINBICEPFILEPPATH: "${{github.workspace}}/${{github.event.inputs.subscriptionName}}/${{github.event.inputs.resourceGroupName}}/main.bicep"
+      BICEPPARAMFILEPATH: "${{github.workspace}}/${{github.event.inputs.subscriptionName}}/${{github.event.inputs.resourceGroupName}}/main.bicepparam"
+      RESOURCE_GROUP: "${{ github.event.inputs.resourceGroupName }}"
+
+
+jobs:
+       bicep-deployment-job:
+           name: "bicep deployment job"
+           runs-on: 'ubuntu-latest'
+           environment: ${{github.event.inputs.environment}}
+           steps:
+            #Code checkout step
+            - name: "Checkout code"
+              uses: actions/checkout@v5
+              with:
+                     fetch-depth: 1
+
+            #Check if the bicep file exists
+            - name: "Check if the bicep & bicepparam file exists"
+              shell: bash
+              run: |
+                    echo "Checking for main.bicep file and main.biceparam file......"
+                    if [[ ! -f "$MAINBICEPFILEPPATH" ]];
+                    then
+                        echo "Error: Main.bicep files not found"
+                        echo "Expected path: $MAINBICEPFILEPPATH"
+                        exit 1
+                    else
+                        echo "main.bicep file found...!!!"
+                    
+                    echo "Checking for the main.bicepparam file......"
+                    if [[ ! -f "$BICEPPARAMFILEPATH"  ]];
+                    then
+                        echo "Error: main.bicepparam file not found...."
+                        echo "Expected path:$BICEPPARAMFILEPATH"
+                        exit 1
+                    
+                            
+            #Azure Login step
+            - name: "Azure login"
+              uses: azure/login@v2
+              with:
+                    client-id: ${{ secrets.CLIENT_ID }}
+                    tenant-id: ${{secrets.TENANT_ID }}
+                    subscription-id: ${{ secrets.SUBSCRIPTION_ID }} # dev- dev-aads-lillynowkb  qa- qa-aads-lillynowkb
+                    enable-AzPSSession: true
+
+            #Set the subscription context
+            - name: "Set the subscription context"
+              uses: azure/cli@v2
+              with:
+                    azcliversion: latest   #forgot
+                    inlineScript: |        #forgot
+                            #Set Az subscription
+                            az account set --subscription ${{ secrets.AZURE_SUBSCRIPTION_ID }} #mistaken --sub for --name
+
+                            SUB_NAME=$(az account show --query name --output tsv)
+                            SUB_ID=$(az account show --query id output tsv)
+                            TENANT_ID=$(az account show --query tenantId --output tsv)
+
+                            echo "============================="
+                            echo "Current context details:"
+                            echo "============================="
+                            echo "Subscription Name: $SUB_NAME"
+                            echo "Subscription ID: $SUB_ID"
+                            echo "Tenant ID: $TENANT_ID"
+                
+            #Check if the resource group exists
+            - name: "Check if the resource group exists"
+              uses: azure/cli@v2
+              with: 
+                    azcliversion: latest
+                    inlineScript: |
+                            if az group show --name $RESOURCE_GROUP > /dev/null 2>&1;
+                            then
+                                echo "Resource group: $RESOURCE_GROUP exists__"
+                            else
+                                echo "!!!...Resource group:$RESOURCE_GROUP doesn't exists...!!!!"
+                                exit 1
+                            fi
+        
+            #Validating the bicep file
+            - name: "Validate the bicep file"
+              uses: azure/cli@v2
+              with:
+                    azcliversion: latest
+                    inlineScript: |
+                                echo "Validating Bicep template..."
+                                az deployment group validate \
+                                    --resource-group ${{ env.RESOURCE_GROUP }} \
+                                    --template-file ${{ env.MAINBICEPFILEPPATH }} \
+                                    --parameters ${{ env.BICEPPARAMFILEPATH }}
+                                echo "validation success....!!!"
+
+            #Preview changes with the What-if
+            - name: "Preview changes with What-IF"
+              uses: azure/cli@v2
+              with:
+                    azcliversion: 'latest'
+                    inlineScript: |
+                                    echo "Preview the changes with What IF"
+                                    az group deployment what-if \
+                                       --resource-group ${{ env.RESOURCE_GROUP }} \
+                                       --template-file ${{ env.MAINBICEPFILEPPATH }} \
+                                       --parameters ${{ env.BICEPPARAMFILEPATH }} \
+                                       --result-format FullResourcePayloads
+
+            #Deploying the main.bicepfile
+            - name: "Deploying the main.bicepfile"
+              if: github.event.inputs.environment == 'dev' && github.ref_name == 'dev'
+              uses: azure/cli@v2
+              with:
+                    azcliversion: latest
+                    inlineScript: |
+                                    az deployment group create \
+                                        --resource-group $RESOURCE_GROUP \
+                                        --template-file $MAINBICEFILEPPATH \
+                                        --parameters $BICEPPARAMFILEPATH \
+                                        --mode Incremental \
+                                        --name "${{github.repository}}-${{github.run_number}}-dev-deployment"
+                                        --verbose
+                                    echo "Dev deployment completed"
+        
+       
+                      
